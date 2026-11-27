@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth0 } from '@auth0/auth0-react'
+import { useAuth } from '../auth'
 import { simulateProfile } from '../utils/api'
+import StepForm from '../components/StepForm'
+import Icon from '../components/Icon'
 
 const STEPS = [
   {
     id: 'profile',
+    short: 'Your life',
     title: 'Tell us about your life context',
     subtitle: 'This helps the simulator reason about stress, resilience, and tradeoffs.',
     fields: [
@@ -33,6 +36,7 @@ const STEPS = [
   },
   {
     id: 'decision',
+    short: 'The decision',
     title: 'What decision are you considering?',
     subtitle: 'We will simulate its impact across money, stress, risk, and goals.',
     fields: [
@@ -60,6 +64,7 @@ const STEPS = [
   },
   {
     id: 'resilience',
+    short: 'Your buffer',
     title: 'How prepared do you feel today?',
     subtitle: 'This helps the AI coach understand your current buffer and stress load.',
     fields: [
@@ -97,8 +102,9 @@ export default function SimulatorOnboarding({ setSimProfile, setSimResults }) {
   const [form, setForm]       = useState(DEFAULT_FORM)
   const [errors, setErrors]   = useState({})
   const [loading, setLoading] = useState(false)
+  const [formError, setFormError] = useState('')
   const navigate = useNavigate()
-  const { getAccessTokenSilently, isAuthenticated } = useAuth0()
+  const { getAccessTokenSilently, isAuthenticated } = useAuth()
 
   const current = STEPS[step]
 
@@ -119,6 +125,7 @@ export default function SimulatorOnboarding({ setSimProfile, setSimResults }) {
     if (step < STEPS.length - 1) { setStep(s => s + 1); return }
 
     setLoading(true)
+    setFormError('')
     try {
       const payload = {
         ...form,
@@ -137,84 +144,20 @@ export default function SimulatorOnboarding({ setSimProfile, setSimResults }) {
       setSimResults(data)
       navigate('/simulator/results')
     } catch {
-      alert('Something went wrong. Make sure the backend is running.')
+      setFormError('Something went wrong while running the simulation. Please try again.')
     } finally {
       setLoading(false)
     }
   }
 
-  const inputStyle = {
-    width: '100%', padding: '12px 14px',
-    border: '1.5px solid var(--border)', borderRadius: 10,
-    fontSize: '0.9rem', background: 'var(--white)', color: 'var(--navy)',
-    appearance: 'none', WebkitAppearance: 'none',
-  }
-
   return (
-    <div style={{ minHeight: 'calc(100vh - 60px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem 1rem' }}>
-      <div style={{ width: '100%', maxWidth: 540 }}>
-
-        {/* Progress bar */}
-        <div style={{ marginBottom: '1.75rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--muted)', fontWeight: 500 }}>Step {step + 1} of {STEPS.length}</span>
-            <span style={{ fontSize: '0.8rem', color: 'var(--emerald)', fontWeight: 600 }}>{Math.round(((step + 1) / STEPS.length) * 100)}%</span>
-          </div>
-          <div style={{ height: 4, background: 'var(--border)', borderRadius: 2 }}>
-            <div style={{ height: '100%', width: `${((step + 1) / STEPS.length) * 100}%`, background: 'var(--emerald)', borderRadius: 2, transition: 'width 0.4s ease' }} />
-          </div>
-        </div>
-
-        {/* Mode badge */}
-        <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
-          <span className="badge badge-amber">⚡ Life Impact Simulator</span>
-        </div>
-
-        <div className="card fade-up" style={{ padding: '2.5rem' }}>
-          <h2 style={{ marginBottom: '0.5rem' }}>{current.title}</h2>
-          <p style={{ marginBottom: '2rem', fontSize: '0.9rem' }}>{current.subtitle}</p>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-            {current.fields.map(field => (
-              <div key={field.key}>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, color: 'var(--navy)', marginBottom: 6 }}>
-                  {field.label}
-                </label>
-                {field.type === 'select' ? (
-                  <select value={form[field.key]} onChange={e => setForm(f => ({ ...f, [field.key]: e.target.value }))} style={inputStyle}>
-                    <option value="">Select an option...</option>
-                    {field.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                ) : (
-                  <input type={field.type} value={form[field.key]}
-                    onChange={e => setForm(f => ({ ...f, [field.key]: e.target.value }))}
-                    placeholder={field.placeholder} min={field.min} max={field.max} style={inputStyle} />
-                )}
-                {errors[field.key] && (
-                  <p style={{ color: 'var(--red)', fontSize: '0.78rem', marginTop: 4 }}>{errors[field.key]}</p>
-                )}
-              </div>
-            ))}
-          </div>
-
-          <div style={{ display: 'flex', gap: 10, marginTop: '2rem' }}>
-            {step > 0 && (
-              <button onClick={() => setStep(s => s - 1)}
-                style={{ flex: 1, padding: '12px', borderRadius: 10, background: 'transparent', border: '1.5px solid var(--border)', color: 'var(--muted)', cursor: 'pointer' }}>
-                ← Back
-              </button>
-            )}
-            <button onClick={handleNext} disabled={loading}
-              style={{ flex: 2, padding: '12px', borderRadius: 10, background: loading ? 'var(--muted)' : 'var(--emerald)', color: '#fff', fontWeight: 600, fontSize: '0.95rem', cursor: loading ? 'not-allowed' : 'pointer' }}>
-              {loading ? '⚡ Simulating futures...' : step === STEPS.length - 1 ? 'Run Simulation →' : 'Continue →'}
-            </button>
-          </div>
-        </div>
-
-        <p style={{ textAlign: 'center', fontSize: '0.75rem', marginTop: '1rem', color: 'var(--muted)' }}>
-          Private by design. Sign in is optional for the demo.
-        </p>
-      </div>
-    </div>
+    <StepForm
+      steps={STEPS} step={step} form={form} setForm={setForm} errors={errors} loading={loading} formError={formError}
+      onBack={() => { setErrors({}); setStep(s => s - 1) }} onNext={handleNext}
+      nextLabel={step === STEPS.length - 1 ? 'Run simulation' : 'Continue'}
+      loadingLabel="Simulating futures…"
+      badge={<span className="badge badge-amber"><Icon name="bolt" size={13} /> Life Impact Simulator</span>}
+      footer="Private by design. Sign-in is optional for the demo."
+    />
   )
 }

@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
-import { useAuth0 } from '@auth0/auth0-react'
-import { sendChat, textToSpeech } from '../utils/api'
+import { useAuth } from '../auth'
+import { sendChat, textToSpeech, DEMO_MODE } from '../utils/api'
+import { speak, stopSpeaking } from '../utils/speech'
 import ReactMarkdown from 'react-markdown'
+import Icon from '../components/Icon'
 
 const SUGGESTIONS = [
   'What is an emergency fund and how much do I need?',
@@ -12,12 +14,12 @@ const SUGGESTIONS = [
 ]
 
 export default function Chat({ profile }) {
-  const { getAccessTokenSilently, user } = useAuth0()
+  const { getAccessTokenSilently, user } = useAuth()
   const getToken = () => getAccessTokenSilently({ authorizationParams: { audience: import.meta.env.VITE_AUTH0_AUDIENCE } })
 
   const [messages, setMessages] = useState([{
     role: 'assistant',
-    content: `Hi ${user?.given_name || ''}! I'm your FinGuard AI financial wellness coach — powered by Google Gemini. 👋\n\nAsk me anything about budgeting, insurance, emergency funds, or financial planning in plain English. I'm here to help!`,
+    content: `Hi ${user?.given_name || 'there'}! I'm your FinGuard AI financial wellness coach.\n\nAsk me anything about budgeting, insurance, emergency funds, or financial planning in plain English. I'm here to help!`,
   }])
   const [input,      setInput]      = useState('')
   const [loading,    setLoading]    = useState(false)
@@ -37,7 +39,7 @@ export default function Chat({ profile }) {
       const data = await sendChat(msg, profile, getToken)
       setMessages(prev => [...prev, { role: 'assistant', content: data.response, source: data.source }])
     } catch {
-      setMessages(prev => [...prev, { role: 'assistant', content: '⚠️ Could not connect to the server. Make sure the backend is running on port 8000.' }])
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Something went wrong while answering. Please try again.' }])
     } finally {
       setLoading(false)
     }
@@ -47,12 +49,18 @@ export default function Chat({ profile }) {
     // Stop if already playing this message
     if (playingIdx === idx) {
       audioRef.current?.pause()
+      stopSpeaking()
       setPlayingIdx(null)
       return
     }
     try {
       setPlayingIdx(idx)
       const blob = await textToSpeech(text, getToken)
+      if (!blob) {               // no ElevenLabs: use the browser's built-in voice
+        await speak(text)
+        setPlayingIdx(null)
+        return
+      }
       const url  = URL.createObjectURL(blob)
       if (audioRef.current) { audioRef.current.pause(); URL.revokeObjectURL(audioRef.current.src) }
       audioRef.current = new Audio(url)
@@ -61,53 +69,64 @@ export default function Chat({ profile }) {
     } catch (e) {
       console.error('TTS error:', e)
       setPlayingIdx(null)
-      alert('Could not play audio. Check your ElevenLabs API key.')
+      alert('Could not play audio in this browser.')
     }
   }
 
+  const lastIdx = messages.length - 1
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 60px)', maxWidth: 720, margin: '0 auto', padding: '0 1rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)', maxWidth: 760, margin: '0 auto', padding: '0 1rem' }}>
 
       {/* Header */}
-      <div style={{ padding: '1rem 0 0.5rem', borderBottom: '1px solid var(--border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--emerald)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>🛡</div>
-          <div>
-            <div style={{ fontWeight: 600, color: 'var(--navy)' }}>FinGuard AI Coach</div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--emerald)' }}>● Powered by Google Gemini · Voice by ElevenLabs</div>
+      <header style={{ padding: '1rem 0 0.9rem', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <Avatar size={42} />
+        <div style={{ minWidth: 0 }}>
+          <h1 style={{ fontFamily: 'var(--font-body)', fontSize: '1.02rem', fontWeight: 600, color: 'var(--navy)' }}>FinGuard AI coach</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', color: 'var(--emerald-dark)' }}>
+            <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--emerald)' }} />
+            {DEMO_MODE ? 'Offline coach · browser voice' : 'Powered by Google Gemini · voice by ElevenLabs'}
           </div>
         </div>
-      </div>
+      </header>
 
       {/* Messages */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '1rem 0', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      <div role="log" aria-live="polite" style={{ flex: 1, overflowY: 'auto', padding: '1.25rem 0', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
         {messages.map((msg, i) => (
-          <div key={i} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
-            {msg.role === 'assistant' && (
-              <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--emerald)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', marginRight: 8, marginTop: 4 }}>🛡</div>
-            )}
-            <div style={{ maxWidth: '80%' }}>
-              <div style={{ padding: '10px 14px', borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '4px 18px 18px 18px', background: msg.role === 'user' ? 'var(--emerald)' : 'var(--white)', color: msg.role === 'user' ? '#fff' : 'var(--navy)', border: msg.role === 'assistant' ? '1px solid var(--border)' : 'none', fontSize: '0.9rem', lineHeight: 1.65, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+          <div key={i} className="fade-up" style={{ display: 'flex', gap: 10, justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start', alignItems: 'flex-start' }}>
+            {msg.role === 'assistant' && <Avatar size={30} />}
+            <div style={{ maxWidth: 'min(82%, 560px)' }}>
+              <div style={{
+                padding: '11px 15px', fontSize: '0.92rem', lineHeight: 1.65,
+                borderRadius: msg.role === 'user' ? '18px 18px 6px 18px' : '6px 18px 18px 18px',
+                background: msg.role === 'user' ? 'var(--emerald)' : 'var(--white)',
+                color: msg.role === 'user' ? '#fff' : 'var(--navy)',
+                border: msg.role === 'assistant' ? '1px solid var(--border)' : 'none',
+                boxShadow: msg.role === 'user' ? '0 6px 18px -10px rgba(5,150,105,0.8)' : 'var(--shadow)',
+              }}>
                 {msg.role === 'assistant' ? (
                   <ReactMarkdown components={{
                     p:      ({ children }) => <p style={{ margin: '0 0 0.5rem', color: 'var(--navy)' }}>{children}</p>,
                     strong: ({ children }) => <strong style={{ color: 'var(--navy)', fontWeight: 600 }}>{children}</strong>,
-                    ul:     ({ children }) => <ul style={{ paddingLeft: '1.25rem', margin: '0.5rem 0' }}>{children}</ul>,
-                    li:     ({ children }) => <li style={{ color: 'var(--muted)', marginBottom: 4 }}>{children}</li>,
+                    ul:     ({ children }) => <ul style={{ paddingLeft: '1.2rem', margin: '0.4rem 0 0.5rem' }}>{children}</ul>,
+                    ol:     ({ children }) => <ol style={{ paddingLeft: '1.2rem', margin: '0.4rem 0 0.5rem' }}>{children}</ol>,
+                    li:     ({ children }) => <li style={{ color: 'var(--slate)', marginBottom: 4 }}>{children}</li>,
                   }}>
                     {msg.content}
                   </ReactMarkdown>
                 ) : msg.content}
               </div>
 
-              {/* ElevenLabs Listen button — only on assistant messages */}
               {msg.role === 'assistant' && i > 0 && (
                 <button
+                  className="btn btn-quiet btn-sm"
                   onClick={() => handleListen(msg.content, i)}
-                  style={{ marginTop: 6, padding: '4px 12px', borderRadius: 99, border: '1px solid var(--border)', background: playingIdx === i ? 'var(--emerald-light)' : 'var(--white)', color: playingIdx === i ? 'var(--emerald-dark)' : 'var(--muted)', fontSize: '0.75rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
+                  aria-pressed={playingIdx === i}
+                  style={{ marginTop: 6, padding: '5px 11px', gap: 6, fontWeight: 500, ...(playingIdx === i ? { background: 'var(--emerald-light)', color: 'var(--emerald-dark)', borderColor: 'transparent' } : {}) }}
                 >
-                  {playingIdx === i ? '⏹ Stop' : '🔊 Listen'}
-                  <span style={{ fontSize: '0.65rem', color: 'var(--muted)' }}>ElevenLabs</span>
+                  <Icon name={playingIdx === i ? 'stop' : 'volume'} size={14} />
+                  {playingIdx === i ? 'Stop' : 'Listen'}
+                  <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontWeight: 400 }}>{DEMO_MODE ? 'browser voice' : 'ElevenLabs'}</span>
                 </button>
               )}
             </div>
@@ -115,10 +134,10 @@ export default function Chat({ profile }) {
         ))}
 
         {loading && (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--emerald)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem' }}>🛡</div>
-            <div style={{ padding: '10px 16px', background: 'var(--white)', border: '1px solid var(--border)', borderRadius: '4px 18px 18px 18px', display: 'flex', gap: 4 }}>
-              {[0,1,2].map(i => <span key={i} style={{ width: 6, height: 6, background: 'var(--muted)', borderRadius: '50%', animation: 'fadeUp 0.6s ease infinite', animationDelay: `${i * 0.15}s` }} />)}
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }} role="status" aria-label="Coach is typing">
+            <Avatar size={30} />
+            <div style={{ padding: '12px 16px', background: 'var(--white)', border: '1px solid var(--border)', borderRadius: '6px 18px 18px 18px', display: 'flex', gap: 5 }}>
+              {[0, 1, 2].map(d => <span key={d} style={{ width: 7, height: 7, background: 'var(--muted)', borderRadius: '50%', animation: 'blink 1.2s ease-in-out infinite', animationDelay: `${d * 0.18}s` }} />)}
             </div>
           </div>
         )}
@@ -126,22 +145,45 @@ export default function Chat({ profile }) {
       </div>
 
       {/* Suggestions */}
-      {messages.length <= 1 && (
-        <div style={{ padding: '0.5rem 0' }}>
-          <p style={{ fontSize: '0.78rem', marginBottom: 8 }}>Suggested questions:</p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      {lastIdx < 1 && (
+        <div style={{ padding: '0.25rem 0 0.75rem' }}>
+          <p style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Icon name="sparkles" size={14} /> Try asking
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {SUGGESTIONS.map(s => (
-              <button key={s} onClick={() => send(s)} style={{ padding: '6px 12px', borderRadius: 99, background: 'var(--white)', border: '1px solid var(--border)', color: 'var(--navy)', fontSize: '0.78rem', cursor: 'pointer' }}>{s}</button>
+              <button key={s} className="btn btn-secondary btn-sm" onClick={() => send(s)} style={{ fontWeight: 500, whiteSpace: 'normal', textAlign: 'left' }}>{s}</button>
             ))}
           </div>
         </div>
       )}
 
       {/* Input */}
-      <div style={{ padding: '0.75rem 0 1rem', borderTop: '1px solid var(--border)', display: 'flex', gap: 8 }}>
-        <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()} placeholder="Ask about budgeting, insurance, emergency funds…" disabled={loading} style={{ flex: 1, padding: '11px 16px', border: '1.5px solid var(--border)', borderRadius: 99, fontSize: '0.9rem', background: 'var(--white)', color: 'var(--navy)' }} />
-        <button onClick={() => send()} disabled={loading || !input.trim()} style={{ width: 44, height: 44, borderRadius: '50%', background: input.trim() ? 'var(--emerald)' : 'var(--border)', color: '#fff', fontSize: '1.1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>→</button>
-      </div>
+      <form
+        onSubmit={e => { e.preventDefault(); send() }}
+        style={{ padding: '0.75rem 0 1rem', borderTop: '1px solid var(--border)', display: 'flex', gap: 8, alignItems: 'center' }}
+      >
+        <label htmlFor="chat-input" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}>Message the coach</label>
+        <input
+          id="chat-input" className="input" value={input} onChange={e => setInput(e.target.value)}
+          placeholder="Ask about budgeting, insurance, emergency funds…" disabled={loading} autoComplete="off"
+          style={{ flex: 1, borderRadius: 999, padding: '12px 18px' }}
+        />
+        <button
+          type="submit" aria-label="Send message" disabled={loading || !input.trim()}
+          className="btn btn-primary" style={{ width: 46, height: 46, padding: 0, borderRadius: '50%', flex: 'none' }}
+        >
+          <Icon name="send" size={18} />
+        </button>
+      </form>
     </div>
+  )
+}
+
+function Avatar({ size }) {
+  return (
+    <span aria-hidden="true" style={{ width: size, height: size, borderRadius: '50%', background: 'var(--emerald)', color: '#fff', display: 'grid', placeItems: 'center', flex: 'none', boxShadow: '0 4px 12px -6px rgba(5,150,105,0.9)' }}>
+      <Icon name="shieldCheck" size={Math.round(size * 0.55)} strokeWidth={2} />
+    </span>
   )
 }

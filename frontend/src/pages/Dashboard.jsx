@@ -1,254 +1,191 @@
 import { useNavigate } from 'react-router-dom'
-import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts'
-import ScoreRing from '../components/ScoreRing'
+import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer } from 'recharts'
+import ScoreRing, { scoreTone } from '../components/ScoreRing'
+import CardHead from '../components/CardHead'
+import Icon from '../components/Icon'
+import { ANIMATE } from '../utils/motion'
 
-const RISK_COLOR = (score) => score >= 70 ? 'var(--emerald)' : score >= 40 ? 'var(--amber)' : 'var(--red)'
-const RISK_LABEL = (score) => score >= 70 ? 'Good' : score >= 40 ? 'Needs Work' : 'At Risk'
-const RISK_BADGE = (score) => score >= 70 ? 'badge-green' : score >= 40 ? 'badge-amber' : 'badge-red'
+const TONE_BADGE = { good: 'badge-green', warn: 'badge-amber', bad: 'badge-red' }
+const TONE_LABEL = { good: 'Good', warn: 'Needs work', bad: 'At risk' }
+const TONE_COLOR = { good: 'var(--emerald)', warn: 'var(--amber)', bad: 'var(--red)' }
 
-const IMPORTANCE_COLOR = { critical: '#dc2626', high: '#d97706', medium: '#0284c7', low: '#64748b' }
-const IMPORTANCE_LABEL = { critical: '🚨 Critical', high: '⚠️ High', medium: '📌 Recommended', low: '💡 Optional' }
+const IMPORTANCE = {
+  critical: { label: 'Critical', badge: 'badge-red', rank: 0 },
+  high: { label: 'High priority', badge: 'badge-amber', rank: 1 },
+  medium: { label: 'Recommended', badge: 'badge-blue', rank: 2 },
+  low: { label: 'Optional', badge: 'badge-slate', rank: 3 },
+}
+const FLOOD = {
+  high: { tile: 'red', title: 'High flood risk' },
+  medium: { tile: 'amber', title: 'Moderate flood risk' },
+  low: { tile: '', title: 'Low flood risk' },
+}
+
+function StatusBadge({ score }) {
+  const t = scoreTone(score)
+  return <span className={`badge ${TONE_BADGE[t]}`}>{TONE_LABEL[t]}</span>
+}
 
 export default function Dashboard({ profile, results }) {
   const nav = useNavigate()
   const { scores, action_plan, insurance_recommendations } = results
+  const fund = scores.emergency_fund
+  const flood = FLOOD[scores.flood.risk_level] || FLOOD.low
+  const insurance = [...insurance_recommendations].sort((a, b) => (IMPORTANCE[a.importance]?.rank ?? 9) - (IMPORTANCE[b.importance]?.rank ?? 9))
+  const priorityGaps = insurance.filter(i => i.importance === 'critical' || i.importance === 'high').length
+
+  const areas = [
+    { key: 'fund', icon: 'wallet', label: 'Emergency fund', score: fund.score, detail: `${fund.current_months} of ${fund.target_months} months saved`, why: `${fund.current_months} of ${fund.target_months} months saved` },
+    { key: 'ins', icon: 'umbrella', label: 'Insurance coverage', score: scores.insurance.score, detail: priorityGaps ? `${priorityGaps} priority gap${priorityGaps > 1 ? 's' : ''} to close` : 'No priority gaps', why: priorityGaps ? `${priorityGaps} priority policy gap${priorityGaps > 1 ? 's' : ''}` : 'no priority gaps' },
+    { key: 'flood', icon: 'waves', label: 'Disaster readiness', score: scores.flood.score, detail: `${flood.title} · ZIP ${profile?.zip_code ?? '—'}`, why: `${flood.title.toLowerCase()} where you live` },
+  ]
+  const weakest = [...areas].sort((a, b) => a.score - b.score)[0]
 
   const radarData = [
-    { subject: 'Emergency Fund', A: scores.emergency_fund.score },
-    { subject: 'Insurance',      A: scores.insurance.score },
-    { subject: 'Disaster Prep',  A: scores.flood.score },
-    { subject: 'Income Security', A: profile?.employment === 'employed' ? 75 : 45 },
-    { subject: 'Future Planning', A: profile?.age < 40 ? 60 : 70 },
+    { subject: 'Emergency fund', A: fund.score },
+    { subject: 'Insurance', A: scores.insurance.score },
+    { subject: 'Disaster prep', A: scores.flood.score },
+    { subject: 'Income security', A: profile?.employment === 'employed' ? 75 : 45 },
+    { subject: 'Future planning', A: profile?.age < 40 ? 60 : 70 },
   ]
-
-  const fundData = [
-    { name: 'Current', value: scores.emergency_fund.current_months, fill: 'var(--emerald)' },
-    { name: 'Target',  value: scores.emergency_fund.target_months,  fill: 'var(--border)' },
-  ]
+  const fundPct = Math.min(100, (fund.current_months / Math.max(fund.target_months, 0.1)) * 100)
+  const overallTone = scoreTone(scores.overall)
 
   return (
-    <div style={{ padding: '2rem 1rem' }}>
-      <div className="container">
+    <div className="page">
+      <div className="container stack">
 
-        {/* Header */}
-        <div className="fade-up" style={{ marginBottom: '2rem' }}>
-          <div className="badge badge-green" style={{ marginBottom: '0.75rem' }}>Your Financial Health Report</div>
-          <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>
-            Overall Score: <span style={{ color: RISK_COLOR(scores.overall) }}>{scores.overall}/100</span>
-          </h1>
-          <p>Here's a personalized breakdown of your financial preparedness.</p>
-        </div>
+        {/* Summary */}
+        <section className="card fade-up" style={{ padding: 'clamp(1.25rem, 4vw, 2rem)', display: 'flex', alignItems: 'center', gap: 'clamp(1.25rem, 4vw, 2.5rem)', flexWrap: 'wrap' }}>
+          <ScoreRing score={scores.overall} size={136} stroke={10} />
+          <div style={{ flex: '1 1 320px' }}>
+            <span className="badge badge-green" style={{ marginBottom: 10 }}><Icon name="clipboard" size={13} /> Your financial health report</span>
+            <h1 style={{ fontSize: 'clamp(1.7rem, 3.6vw, 2.4rem)', marginBottom: 8 }}>
+              Overall score <span style={{ color: TONE_COLOR[overallTone] }}>{scores.overall}</span><span style={{ color: 'var(--muted)', fontSize: '0.6em' }}> / 100</span>
+            </h1>
+            <p style={{ fontSize: '0.98rem', maxWidth: 560 }}>
+              <StatusBadge score={scores.overall} />{' '}
+              Your weakest area is <strong style={{ color: 'var(--navy)' }}>{weakest.label.toLowerCase()}</strong> ({weakest.why}). The plan below starts there.
+            </p>
+          </div>
+        </section>
 
-        {/* Score cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem', marginBottom: '2rem' }}>
-          {[
-            { score: scores.overall,                   label: 'Overall Health' },
-            { score: scores.emergency_fund.score,      label: 'Emergency Fund' },
-            { score: scores.insurance.score,           label: 'Insurance Coverage' },
-            { score: scores.flood.score,               label: 'Disaster Readiness' },
-          ].map(({ score, label }) => (
-            <div key={label} className="card" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <ScoreRing score={score} label={label} size={100} />
-              <span className={`badge ${RISK_BADGE(score)}`} style={{ marginTop: 8 }}>
-                {RISK_LABEL(score)}
-              </span>
+        {/* Area scores */}
+        <section className="grid-3" aria-label="Scores by area">
+          {areas.map(a => (
+            <div key={a.key} className="card card-pad" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <ScoreRing score={a.score} size={84} stroke={7} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, color: 'var(--navy)', marginBottom: 4 }}>
+                  <Icon name={a.icon} size={16} style={{ color: 'var(--muted)' }} />{a.label}
+                </div>
+                <StatusBadge score={a.score} />
+                <p style={{ fontSize: '0.82rem', marginTop: 6 }}>{a.detail}</p>
+              </div>
             </div>
           ))}
-        </div>
+        </section>
 
-        {/* Main grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
+        {/* Detail row */}
+        <section className="grid-3">
+          <div className="card card-pad">
+            <CardHead icon="wallet" title="Emergency fund" sub="Months of essential expenses you could cover" />
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
+              <span style={{ fontFamily: 'var(--font-display)', fontSize: '2.4rem', lineHeight: 1, color: 'var(--navy)' }}>{fund.current_months}</span>
+              <span style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>of {fund.target_months} months</span>
+            </div>
+            <div className="meter" role="progressbar" aria-label="Emergency fund progress" aria-valuemin={0} aria-valuemax={fund.target_months} aria-valuenow={fund.current_months}>
+              <i style={{ width: `${fundPct}%`, background: TONE_COLOR[scoreTone(fund.score)] }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--muted)', marginTop: 6, marginBottom: '1rem' }}>
+              <span>0</span><span>{fund.target_months}-month target</span>
+            </div>
+            {fund.gap_months > 0 ? (
+              <div className="callout callout-amber">
+                <Icon name="target" size={16} style={{ marginTop: 2 }} />
+                <p><strong>${fund.gap_amount.toLocaleString()}</strong> to go, about {fund.gap_months} more months of expenses.</p>
+              </div>
+            ) : (
+              <div className="callout callout-green"><Icon name="check" size={16} style={{ marginTop: 2 }} /><p>You have reached your target.</p></div>
+            )}
+          </div>
 
-          {/* Radar chart */}
-          <div className="card" style={{ padding: '1.5rem' }}>
-            <h3 style={{ marginBottom: '1rem' }}>📊 Financial Health Radar</h3>
-            <ResponsiveContainer width="100%" height={240}>
-              <RadarChart data={radarData}>
+          <div className="card card-pad">
+            <CardHead icon="waves" tone={flood.tile} title="Disaster risk" sub={`Flood exposure for ZIP ${profile?.zip_code ?? '—'}`} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: '0.9rem' }}>
+              <span className={`badge ${scores.flood.risk_level === 'high' ? 'badge-red' : scores.flood.risk_level === 'medium' ? 'badge-amber' : 'badge-green'}`} style={{ fontSize: '0.82rem', padding: '5px 12px' }}>
+                <Icon name={scores.flood.risk_level === 'low' ? 'check' : 'alert'} size={14} /> {flood.title}
+              </span>
+            </div>
+            <p style={{ fontSize: '0.88rem', lineHeight: 1.6 }}>
+              {scores.flood.risk_level === 'low'
+                ? 'Your area has relatively low flood risk. Standard renters or homeowners coverage should handle most weather events.'
+                : <>Standard renters and homeowners insurance usually does <strong style={{ color: 'var(--navy)' }}>not</strong> cover flooding. Consider a separate policy through FEMA&apos;s NFIP program.</>}
+            </p>
+          </div>
+
+          <div className="card card-pad">
+            <CardHead icon="target" tone="violet" title="Health radar" sub="All five areas at a glance (0–100)" />
+            <ResponsiveContainer width="100%" height={220}>
+              <RadarChart data={radarData} outerRadius="62%" margin={{ top: 4, right: 46, bottom: 4, left: 46 }}>
                 <PolarGrid stroke="var(--border)" />
                 <PolarAngleAxis dataKey="subject" tick={{ fontSize: 11, fill: 'var(--muted)' }} />
-                <Radar name="Score" dataKey="A" stroke="var(--emerald)" fill="var(--emerald)" fillOpacity={0.15} strokeWidth={2} />
+                <Radar name="Score" dataKey="A" stroke="var(--emerald)" fill="var(--emerald)" fillOpacity={0.18} strokeWidth={2} isAnimationActive={ANIMATE} />
               </RadarChart>
             </ResponsiveContainer>
           </div>
+        </section>
 
-          {/* Emergency fund detail */}
-          <div className="card" style={{ padding: '1.5rem' }}>
-            <h3 style={{ marginBottom: '0.5rem' }}>💰 Emergency Fund Status</h3>
-            <p style={{ fontSize: '0.85rem', marginBottom: '1.25rem' }}>
-              You have <strong style={{ color: 'var(--navy)' }}>{scores.emergency_fund.current_months} month(s)</strong> saved.
-              {' '}Target: <strong style={{ color: 'var(--navy)' }}>{scores.emergency_fund.target_months} months</strong>.
-            </p>
-            <ResponsiveContainer width="100%" height={140}>
-              <BarChart data={fundData} barSize={40}>
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: 'var(--muted)' }} />
-                <YAxis hide domain={[0, 8]} />
-                <Tooltip formatter={(v) => [`${v} months`]} />
-                <Bar dataKey="value" radius={[6, 6, 0, 0]}>
-                  {fundData.map((entry, i) => (
-                    <Cell key={i} fill={entry.fill} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-            {scores.emergency_fund.gap_months > 0 && (
-              <div style={{
-                marginTop: '1rem', padding: '12px 14px',
-                background: 'var(--amber-light)', borderRadius: 8,
-                border: '1px solid #fcd34d',
-              }}>
-                <p style={{ fontSize: '0.85rem', color: '#78350f', fontWeight: 500 }}>
-                  Gap: ${scores.emergency_fund.gap_amount.toLocaleString()} ({scores.emergency_fund.gap_months} more months needed)
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Flood risk */}
-          <div className="card" style={{ padding: '1.5rem' }}>
-            <h3 style={{ marginBottom: '0.75rem' }}>🌊 Disaster Risk — ZIP {profile?.zip_code}</h3>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 12,
-              padding: '1rem', borderRadius: 10,
-              background: scores.flood.risk_level === 'high' ? 'var(--red-light)' :
-                          scores.flood.risk_level === 'medium' ? 'var(--amber-light)' : 'var(--emerald-light)',
-              marginBottom: '1rem',
-            }}>
-              <span style={{ fontSize: '2rem' }}>
-                {scores.flood.risk_level === 'high' ? '🔴' : scores.flood.risk_level === 'medium' ? '🟡' : '🟢'}
-              </span>
-              <div>
-                <div style={{ fontWeight: 600, color: 'var(--navy)', textTransform: 'capitalize' }}>
-                  {scores.flood.risk_level} Flood Risk
-                </div>
-                <p style={{ fontSize: '0.8rem', marginTop: 2 }}>Based on your ZIP code area</p>
-              </div>
-            </div>
-            {scores.flood.risk_level !== 'low' && (
-              <div style={{ fontSize: '0.85rem', color: 'var(--muted)', lineHeight: 1.6 }}>
-                ⚠ Standard renters/homeowners insurance typically does <strong>not</strong> cover flooding. 
-                Consider a separate flood insurance policy through FEMA's NFIP program.
-              </div>
-            )}
-            {scores.flood.risk_level === 'low' && (
-              <p style={{ fontSize: '0.85rem' }}>
-                Your area has relatively low flood risk. Your standard insurance should provide adequate coverage for most weather events.
-              </p>
-            )}
-          </div>
-
-          {/* Insurance gaps */}
-          <div className="card" style={{ padding: '1.5rem' }}>
-            <h3 style={{ marginBottom: '1rem' }}>🛡️ Recommended Insurance</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {insurance_recommendations.map(ins => (
-                <div key={ins.id} style={{
-                  display: 'flex', alignItems: 'flex-start', gap: 10,
-                  padding: '10px 12px', borderRadius: 8,
-                  border: '1px solid var(--border)',
-                  background: ins.importance === 'critical' ? 'var(--red-light)' : 'var(--white)',
-                }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                      <span style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--navy)' }}>{ins.name}</span>
-                      <span style={{
-                        fontSize: '0.7rem', fontWeight: 600,
-                        color: IMPORTANCE_COLOR[ins.importance],
-                        padding: '1px 6px', borderRadius: 99,
-                        background: `${IMPORTANCE_COLOR[ins.importance]}18`,
-                      }}>
-                        {IMPORTANCE_LABEL[ins.importance]}
-                      </span>
-                    </div>
-                    <p style={{ fontSize: '0.78rem', margin: 0 }}>{ins.description}</p>
+        {/* Insurance */}
+        <section className="card card-pad">
+          <CardHead icon="umbrella" tone="blue" title="Recommended insurance" sub="Sorted by how much each policy matters for your situation" />
+          <div className="grid-fit" style={{ '--min': '240px' }}>
+            {insurance.map(ins => {
+              const imp = IMPORTANCE[ins.importance] || IMPORTANCE.low
+              return (
+                <article key={ins.id} style={{ border: '1px solid var(--border)', borderRadius: 14, padding: '1rem 1.1rem', display: 'flex', flexDirection: 'column', gap: 8, background: ins.importance === 'critical' ? '#fff7f7' : 'var(--white)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+                    <strong style={{ color: 'var(--navy)', fontSize: '0.95rem' }}>{ins.name}</strong>
+                    <span style={{ whiteSpace: 'nowrap', fontWeight: 700, color: 'var(--emerald-dark)' }}>~${ins.avg_cost}<span style={{ fontWeight: 500, fontSize: '0.75rem', color: 'var(--muted)' }}>/mo</span></span>
                   </div>
-                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--emerald-dark)' }}>
-                      ~${ins.avg_cost}/mo
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
+                  <span className={`badge ${imp.badge}`} style={{ alignSelf: 'flex-start' }}>{imp.label}</span>
+                  <p style={{ fontSize: '0.83rem', lineHeight: 1.5 }}>{ins.description}</p>
+                </article>
+              )
+            })}
           </div>
-        </div>
+        </section>
 
-        {/* Action Plan */}
-        <div className="card" style={{ padding: '2rem', marginBottom: '2rem' }}>
-          <h2 style={{ marginBottom: '0.5rem' }}>🗓️ Your 90-Day Action Plan</h2>
-          <p style={{ marginBottom: '1.5rem', fontSize: '0.9rem' }}>Personalized steps to close your financial gaps.</p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        {/* Action plan */}
+        <section className="card" style={{ padding: 'clamp(1.25rem, 4vw, 2rem)' }}>
+          <CardHead as="h2" icon="calendar" title="Your 90-day action plan" sub="Personalized steps to close your gaps, in order." />
+          <div className="plan">
             {action_plan.map((item, idx) => (
-              <div key={idx} style={{
-                display: 'grid', gridTemplateColumns: '80px 1fr',
-                gap: '1rem', alignItems: 'start',
-                padding: '1.25rem', borderRadius: 12,
-                border: '1px solid var(--border)',
-                background: idx === 0 ? 'rgba(5,150,105,0.03)' : 'var(--white)',
-              }}>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{
-                    width: 44, height: 44, borderRadius: '50%',
-                    background: item.priority === 'high' ? 'var(--emerald)' : 'var(--border)',
-                    color: item.priority === 'high' ? '#fff' : 'var(--muted)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontFamily: 'var(--font-display)', fontSize: '1rem',
-                    margin: '0 auto 6px',
-                  }}>
-                    {idx + 1}
-                  </div>
-                  <span style={{ fontSize: '0.7rem', color: 'var(--muted)' }}>
-                    Week {item.week}
-                  </span>
+              <div key={idx} className={`plan-item${idx === 0 ? ' first' : ''}`}>
+                <div>
+                  <div className={`plan-num${item.priority === 'high' ? ' high' : ''}`}>{idx + 1}</div>
+                  <span className="plan-week">Week {item.week}</span>
                 </div>
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                    <h3 style={{ fontSize: '1rem', fontFamily: 'var(--font-body)', fontWeight: 600 }}>{item.title}</h3>
-                    <span className={`badge ${item.priority === 'high' ? 'badge-red' : 'badge-amber'}`} style={{ fontSize: '0.7rem' }}>
-                      {item.priority === 'high' ? 'High priority' : 'Medium'}
-                    </span>
-                    <span style={{ marginLeft: 'auto', fontSize: '0.75rem', color: 'var(--muted)' }}>
-                      ⏱ {item.time_estimate}
-                    </span>
+                  <div className="plan-title">
+                    <h3>{item.title}</h3>
+                    <span className={`badge ${item.priority === 'high' ? 'badge-red' : 'badge-amber'}`}>{item.priority === 'high' ? 'High priority' : 'Medium'}</span>
+                    <span className="plan-time"><Icon name="clock" size={14} />{item.time_estimate}</span>
                   </div>
-                  <ul style={{ paddingLeft: '1.1rem', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {item.tasks.map((task, ti) => (
-                      <li key={ti} style={{ fontSize: '0.875rem', color: 'var(--muted)', lineHeight: 1.5 }}>{task}</li>
-                    ))}
-                  </ul>
+                  <ul>{item.tasks.map((task, ti) => <li key={ti}>{task}</li>)}</ul>
                 </div>
               </div>
             ))}
           </div>
+        </section>
+
+        <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+          <button className="btn btn-primary btn-lg" onClick={() => nav('/chat')}><Icon name="chat" size={18} /> Ask the AI coach</button>
+          <button className="btn btn-secondary btn-lg" onClick={() => nav('/onboarding')}><Icon name="refresh" size={18} /> Retake assessment</button>
         </div>
 
-        {/* CTA */}
-        <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap', marginBottom: '2rem' }}>
-          <button
-            onClick={() => nav('/chat')}
-            style={{
-              background: 'var(--emerald)', color: '#fff',
-              padding: '14px 28px', borderRadius: 99,
-              fontWeight: 600, fontSize: '0.95rem',
-              boxShadow: '0 4px 20px rgba(5,150,105,0.3)',
-            }}
-          >
-            💬 Ask AI Coach a Question
-          </button>
-          <button
-            onClick={() => nav('/onboarding')}
-            style={{
-              background: 'var(--white)', color: 'var(--navy)',
-              padding: '14px 28px', borderRadius: 99,
-              border: '1.5px solid var(--border)',
-              fontWeight: 500, fontSize: '0.95rem',
-            }}
-          >
-            Retake Assessment
-          </button>
-        </div>
-
-        <p style={{ textAlign: 'center', fontSize: '0.75rem', color: 'var(--muted)', paddingBottom: '2rem' }}>
-          This is for educational purposes only. Consult a licensed financial advisor or insurance professional.
+        <p style={{ textAlign: 'center', fontSize: '0.75rem' }}>
+          For educational purposes only. Consult a licensed financial advisor or insurance professional.
         </p>
       </div>
     </div>

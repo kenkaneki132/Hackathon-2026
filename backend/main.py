@@ -1,6 +1,5 @@
 import os
 import httpx
-import random
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Depends, Security
@@ -20,7 +19,9 @@ ELEVENLABS_API_KEY  = os.getenv("ELEVENLABS_API_KEY", "")
 ELEVENLABS_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"
 
 app = FastAPI(title="FinGuard AI API", version="3.0.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+# Browsers reject credentialed requests to a wildcard origin, so only allow credentials with explicit origins.
+app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credentials=ALLOWED_ORIGINS != ["*"], allow_methods=["*"], allow_headers=["*"])
 security = HTTPBearer(auto_error=False)
 
 # ─── Auth0 ─────────────────────────────────────────────────────────────────────
@@ -127,40 +128,74 @@ SCENARIO_MODIFIERS = {
 FINGUARD_PROMPT = """You are FinGuard AI, a friendly financial wellness coach helping everyday Americans understand personal finance, insurance, and emergency preparedness in plain English.\n\nGuidelines:\n- Keep responses concise and practical (under 250 words)\n- Use simple language (Grade 8 reading level)\n- Use bullet points and bold text for key points\n- Give specific, actionable steps\n- Never recommend specific investment products\n- Focus on: emergency funds, insurance basics, budgeting, debt, disaster preparedness\n- Always be warm, non-judgmental, and encouraging\n"""
 SIMULATOR_PROMPT = """You are Life Impact AI, a friendly financial decision coach. Help people evaluate how financial decisions affect their money, stress, resilience, and goals. Keep responses concise (under 200 words) and give specific actionable guidance.\n"""
 
-def gemini_chat(message: str, system_prompt: str = FINGUARD_PROMPT, context: str = "") -> str:
-    # if not GEMINI_API_KEY:
-    return fallback_chat(message)
-    # payload = {
-    #     "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser question: {message}{context}"}]}],
-    #     "generationConfig": {"maxOutputTokens": 500, "temperature": 0.7}
-    # }
-    # import urllib.request, urllib.error, json as jm, time
-    # for api_ver, model in [("v1","gemini-2.0-flash-001"),("v1","gemini-2.0-flash"),("v1beta","gemini-2.0-flash"),("v1beta","gemini-2.0-flash-lite")]:
-    #     url = f"https://generativelanguage.googleapis.com/{api_ver}/models/{model}:generateContent?key={GEMINI_API_KEY}"
-    #     for attempt in range(2):
-    #         try:
-    #             req = urllib.request.Request(url, data=jm.dumps(payload).encode(), headers={"Content-Type":"application/json"}, method="POST")
-    #             with urllib.request.urlopen(req, timeout=20) as r:
-    #                 return jm.loads(r.read())["candidates"][0]["content"]["parts"][0]["text"]
-    #         except urllib.error.HTTPError as e:
-    #             if e.code == 429: time.sleep(5*(attempt+1)); continue
-    #             break
-    #         except Exception: break
-    # return fallback_chat(message)
+def gemini_chat(message: str, system_prompt: str = FINGUARD_PROMPT, context: str = "") -> tuple[str, str]:
+    """Returns (response, source). Uses Gemini when GEMINI_API_KEY is set, otherwise the offline coach."""
+    if not GEMINI_API_KEY:
+        return fallback_chat(message), "fallback"
+    payload = {
+        "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser question: {message}{context}"}]}],
+        "generationConfig": {"maxOutputTokens": 500, "temperature": 0.7},
+    }
+    import urllib.request, urllib.error, json as jm, time
+    for api_ver, model in [("v1", "gemini-2.0-flash"), ("v1beta", "gemini-2.0-flash-lite")]:
+        url = f"https://generativelanguage.googleapis.com/{api_ver}/models/{model}:generateContent"
+        for attempt in range(2):
+            try:
+                req = urllib.request.Request(url, data=jm.dumps(payload).encode(), method="POST",
+                                             headers={"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY})
+                with urllib.request.urlopen(req, timeout=20) as r:
+                    return jm.loads(r.read())["candidates"][0]["content"]["parts"][0]["text"], "gemini"
+            except urllib.error.HTTPError as e:
+                if e.code == 429:
+                    time.sleep(2 * (attempt + 1))
+                    continue
+                break
+            except Exception:
+                break
+    return fallback_chat(message), "fallback"
+
+FALLBACK_TOPICS = [
+    (["emergency", "fund", "savings", "save"], "**Emergency Fund Basics**\n\nAim for 3-6 months of expenses in a high-yield savings account. Start with a $1,000 goal — it covers many common emergencies.\n\n- Automate a transfer on payday\n- Keep it separate from checking\n- Only use it for true emergencies"),
+    (["renters", "renter", "apartment"], "**Renters Insurance** costs about $15/month and covers your belongings, liability, and temporary housing if your place becomes unlivable."),
+    (["life insurance", "life", "term"], "**Life Insurance** is essential if you have dependents. Term life is cheapest — a common rule of thumb is 10-12x your annual income in coverage."),
+    (["50/30/20", "budget", "budgeting"], "**The 50/30/20 rule**\n\n- **50%** of take-home pay → needs (rent, groceries, utilities)\n- **30%** → wants\n- **20%** → savings and extra debt payments\n\nTrack one month of spending first, then adjust."),
+    (["disability"], "**Disability Insurance** replaces roughly 60-70% of your income if illness or injury stops you from working. Check whether your employer already offers short- or long-term coverage."),
+    (["flood", "fema", "disaster", "hurricane"], "**Flood coverage** is not included in standard homeowners or renters policies. Look up your address on FEMA flood maps and ask about a separate flood policy if you are in a moderate or high risk zone."),
+    (["debt", "credit card", "loan"], "**Paying down debt**\n\n- List debts by interest rate\n- Pay minimums on all, extra on the highest rate (avalanche)\n- Or smallest balance first (snowball) if you need quick wins"),
+]
+
 
 def fallback_chat(message: str) -> str:
     msg = message.lower()
-    if any(w in msg for w in ["emergency","fund","savings","save"]):
-        return "**Emergency Fund Basics**\n\nAim for 3-6 months of expenses in a high-yield savings account. Start with a $1,000 goal — it covers 90% of common emergencies."
-    if any(w in msg for w in ["renters","renter","apartment"]):
-        return "**Renters Insurance** costs about $15/month and covers your belongings, liability, and temporary housing."
-    if any(w in msg for w in ["life insurance","life","term"]):
-        return "**Life Insurance** is essential if you have dependents. Term life is cheapest — aim for 10-12x your annual income as coverage."
-    return "I can help with **emergency funds**, **insurance basics**, **budgeting**, and **disaster preparedness**. What would you like to know?"
+    for words, answer in FALLBACK_TOPICS:
+        if any(w in msg for w in words):
+            return answer
+    return "I can help with **emergency funds**, **insurance basics**, **budgeting**, **debt**, and **disaster preparedness**. What would you like to know?"
 
 # ─── YOUR ORIGINAL SCORING ─────────────────────────────────────────────────────
 def get_flood_risk(zip_code: str) -> str:
     return FLOOD_RISK_BY_ZIP_PREFIX.get(zip_code[0] if zip_code else "", "medium")
+
+def insurance_readiness(profile: UserProfile) -> int:
+    """Deterministic insurance-readiness score (was random.randint(30, 70), so the same profile
+    scored differently on every request). The profile doesn't capture current policies, so this
+    scores how exposed the household is to common gaps: dependents (life), housing (renters /
+    homeowners), no employer benefits (disability), with credit for income and an existing buffer."""
+    score = 75
+    if profile.dependents > 0:
+        score -= 8 + 4 * min(profile.dependents, 3)
+    if profile.housing_type == "rent":
+        score -= 10
+    elif profile.housing_type == "own":
+        score -= 5
+    if profile.employment in ("self_employed", "unemployed"):
+        score -= 12
+    if profile.annual_income >= 100000:
+        score += 5
+    if profile.has_savings and profile.savings_months >= 3:
+        score += 10
+    return max(20, min(90, score))
+
 
 def calculate_risk_scores(profile: UserProfile) -> dict:
     monthly = profile.monthly_expenses
@@ -172,7 +207,7 @@ def calculate_risk_scores(profile: UserProfile) -> dict:
     elif profile.housing_type == "own": needed.append("homeowners")
     if profile.dependents > 0: needed.append("life")
     needed.extend(["auto","disability"])
-    insurance_score = random.randint(30, 70)
+    insurance_score = insurance_readiness(profile)
     flood_risk = get_flood_risk(profile.zip_code)
     flood_score = {"low":85,"medium":50,"high":20,"unknown":50}[flood_risk]
     return {
@@ -372,7 +407,8 @@ def chat(msg: ChatMessage, user=Depends(optional_auth)):
     context=""
     if msg.profile:
         context=f"\n\n[User: Age {msg.profile.age}, Income ${msg.profile.annual_income:,.0f}, Housing: {msg.profile.housing_type}, Dependents: {msg.profile.dependents}, Savings: {msg.profile.savings_months} months]"
-    return {"response":gemini_chat(msg.message,FINGUARD_PROMPT,context),"source":"gemini" if GEMINI_API_KEY else "fallback","user":user.get("name") if user else None}
+    response, source = gemini_chat(msg.message, FINGUARD_PROMPT, context)
+    return {"response": response, "source": source, "user": user.get("name") if user else None}
 
 @app.get("/api/flood-risk/{zip_code}")
 def flood_risk(zip_code: str):
@@ -396,7 +432,8 @@ def simulate_chat(msg: SimChatMessage, user=Depends(optional_auth)):
     if msg.profile:
         d=DECISION_LIBRARY.get(msg.profile.decision_type,{}); g=GOAL_PROFILES.get(msg.profile.goal_priority,{})
         context=f"\n\n[Decision: {d.get('label',msg.profile.decision_type)}, Goal: {g.get('label',msg.profile.goal_priority)}, Monthly cost: ${msg.profile.decision_cost}, Horizon: {msg.profile.time_horizon} months, Stress: {msg.profile.stress_level}/10]"
-    return {"response":gemini_chat(msg.message,SIMULATOR_PROMPT,context),"source":"gemini" if GEMINI_API_KEY else "fallback"}
+    response, source = gemini_chat(msg.message, SIMULATOR_PROMPT, context)
+    return {"response": response, "source": source}
 
 # Shared auth routes
 @app.post("/api/tts")

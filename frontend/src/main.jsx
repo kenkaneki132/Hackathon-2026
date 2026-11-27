@@ -1,27 +1,19 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { BrowserRouter } from 'react-router-dom'
-import { Auth0Provider } from '@auth0/auth0-react'
+import { BrowserRouter, HashRouter } from 'react-router-dom'
+import { AuthProvider } from './auth.jsx'
 import App from './App.jsx'
 import './index.css'
 
-const domain   = import.meta.env.VITE_AUTH0_DOMAIN
-const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID
-const audience = import.meta.env.VITE_AUTH0_AUDIENCE
+// GitHub Pages can't rewrite deep links to index.html, so static demo builds use hash routing.
+const Router = import.meta.env.VITE_DEMO_MODE === 'true' || import.meta.env.VITE_ROUTER === 'hash' ? HashRouter : BrowserRouter
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <Auth0Provider
-      domain={domain}
-      clientId={clientId}
-      authorizationParams={{
-        redirect_uri: window.location.origin,
-        audience: audience,
-      }}
-    >
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <AuthProvider>
+      <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <App />
-      </BrowserRouter>
-    </Auth0Provider>
+      </Router>
+    </AuthProvider>
   </React.StrictMode>
 )

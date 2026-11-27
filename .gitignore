@@ -4,3 +4,10 @@
 /backend/venv/
 /backend/.venv/
 /frontend/node_modules
+
+# Secrets and OS junk
+.env
+.env.*
+!.env.example
+.DS_Store
+frontend/dist

@@ -1,220 +1,109 @@
-# 🛡️ FinGuard AI — Emergency Financial Preparedness Coach
+# 🛡️ FinGuard AI: Emergency Financial Preparedness Coach
 
-> Built for the StateFarm Financial Wellness Hackathon Track  
-> Stack: **React + Vite** (frontend) · **FastAPI + Python** (backend)
+> Built for the **State Farm Financial Wellness** hackathon track.
+> **Live demo:** https://kenkaneki132.github.io/Hackathon-2026/ (static build) · original Vercel deploy: https://hackathon-2026-gamma.vercel.app
 
----
+![React](https://img.shields.io/badge/React-Vite-61DAFB?logo=react&logoColor=black)
+![FastAPI](https://img.shields.io/badge/FastAPI-Python-009688?logo=fastapi&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-pytest%20%2B%20vitest-success)
 
-## 📁 Project Structure
+Many households can't absorb an unexpected expense. Most finance apps track spending, but few help people **prepare** for job loss, medical bills or natural disasters. FinGuard AI turns a 3-step questionnaire into a **preparedness score**, a **4-week action plan**, insurance-gap recommendations and an **AI coach**. A **Life Impact Simulator** stress-tests big decisions (buying a car, moving, taking a loan, changing jobs) against a job-loss shock.
 
-```
-finguard/
-├── backend/
-│   ├── main.py            # FastAPI app — all routes & logic
-│   └── requirements.txt   # Python dependencies
-└── frontend/
-    ├── src/
-    │   ├── pages/         # Landing, Onboarding, Dashboard, Chat
-    │   ├── components/    # Navbar, ScoreRing
-    │   └── utils/api.js   # API calls to backend
-    ├── index.html
-    ├── vite.config.js
-    └── package.json
-```
+## Features
 
----
+| | |
+|---|---|
+| 🧭 **Assessment** | Age, income, expenses, dependents, housing, ZIP and savings produce emergency-fund, insurance and flood scores |
+| 🗓 **Action plan** | A week-by-week plan with dollar amounts computed from your own numbers |
+| ⚡ **Life Impact Simulator** | Safe, balanced and risky versions of a decision, scored on financial stability, stress, risk, goal progress and resilience, plus a job-loss shock test |
+| 💬 **AI coach** | Gemini when configured, otherwise a built-in offline coach |
+| 🔊 **Listen** | ElevenLabs voice when configured, otherwise the browser's built-in speech |
+| 🔐 **Auth** | Auth0 when configured, otherwise guest mode |
 
-## 🚀 Local Setup
+## Three ways to run it
 
-### Prerequisites
-- **Python 3.9+** — [python.org](https://python.org)
-- **Node.js 18+** — [nodejs.org](https://nodejs.org)
-- **npm** (comes with Node)
+| Mode | What you need | What you get |
+|---|---|---|
+| **Static demo** (`VITE_DEMO_MODE=true`) | nothing | Everything runs in the browser: scoring/simulator engine ported to JS, offline coach, browser voice, guest login |
+| **Local full stack** | Python + Node | FastAPI backend; the frontend falls back to the in-browser engine automatically if the API is down |
+| **Production** | Auth0, Gemini and ElevenLabs keys | Authenticated users, LLM coach, natural voice |
 
----
+## Run it on a new machine
 
-### Step 1 — Backend (FastAPI)
+**Requirements:** **Python 3.11–3.14** (CI uses 3.12) and **Node.js 20+** with npm (CI uses Node 22). No keys are needed to run or test it: without Auth0 you are signed in as a guest, without Gemini the coach answers from built-in guidance, and without ElevenLabs the browser reads answers aloud.
 
 ```bash
-# Navigate to backend folder
-cd finguard/backend
+git clone https://github.com/kenkaneki132/Hackathon-2026.git
+cd Hackathon-2026
 
-# Create a virtual environment
-python -m venv venv
-
-# Activate it
-# On Mac/Linux:
-source venv/bin/activate
-# On Windows:
-venv\Scripts\activate
-
-# Install dependencies
+# backend
+cd backend
+python -m venv venv && source venv/bin/activate      # Windows: venv\Scripts\activate
 pip install -r requirements.txt
+cp .env.example .env                                  # keys are optional
+uvicorn main:app --reload --port 8000                 # http://localhost:8000/docs
 
-# Start the server
-uvicorn main:app --reload --port 8000
+# frontend (new terminal)
+cd frontend
+cp .env.example .env                                  # leave Auth0 empty for guest mode
+npm ci && npm run dev                                 # http://localhost:5173
 ```
 
-✅ Backend runs at: **http://localhost:8000**  
-📖 API docs at: **http://localhost:8000/docs** (Swagger UI)
+No backend at all? `cd frontend && VITE_DEMO_MODE=true npm run dev` (PowerShell: `$env:VITE_DEMO_MODE='true'; npm run dev`).
 
----
+Run every check the way CI does: `cd backend && pip install -r requirements-dev.txt && python -m pytest -q`, then `cd ../frontend && npm test && npm run build`.
 
-### Step 2 — Frontend (React + Vite)
-
-Open a **new terminal tab**, then:
+## Tests
 
 ```bash
-# Navigate to frontend folder
-cd finguard/frontend
-
-# Install dependencies
-npm install
-
-# Start dev server
-npm run dev
+cd backend  && pip install -r requirements-dev.txt && pytest -q    # 65 tests
+cd frontend && npm test                                             # 180 tests
 ```
 
-✅ Frontend runs at: **http://localhost:5173**
+- **Backend (pytest):** deterministic scoring (regression for the old `random.randint` insurance score), score bounds over a profile grid, simulator invariants (safe < balanced < risky cost; job loss hurts unemployed users more), offline-coach topics, auth-protected routes, input validation.
+- **Frontend (Vitest):** **exact parity** between the JavaScript engine and the Python engine on 145 cases exported by `backend/scripts/export_engine_fixtures.py`, including Python's banker's rounding. Also covers API fallback behavior (network errors, 404 and 5xx fall back; 401 and 422 don't) and speech helpers.
+- `tests.yml` runs both suites on every push; `deploy-pages.yml` runs the frontend tests before publishing.
 
-> The Vite dev server proxies `/api/*` requests to `http://localhost:8000` automatically.
+If you change the scoring logic in `backend/main.py`, regenerate the fixtures:
+`cd backend && python scripts/export_engine_fixtures.py`
 
----
+## Architecture
 
-## 🧪 Test the App
+```
+frontend/ (React 18 + Vite)
+  src/auth.jsx               Auth0 or guest session
+  src/utils/api.js           backend first → falls back to localEngine.js
+  src/utils/localEngine.js   JS port of the scoring + simulator engine (parity-tested)
+  src/utils/speech.js        Web Speech API fallback for "Listen"
+  pages/  Landing · Onboarding · Dashboard · Chat · SimulatorOnboarding · SimulatorDashboard
 
-1. Go to **http://localhost:5173**
-2. Click **"Get My Free Assessment"**
-3. Complete the 3-step quiz
-4. See your personalized risk dashboard
-5. Click **"AI Coach"** to ask financial questions
+backend/ (FastAPI)
+  main.py                    scoring, simulator, Gemini coach, ElevenLabs TTS, Auth0 JWT checks
+  scripts/export_engine_fixtures.py
+  tests/test_engine.py
+```
 
----
-
-## 🔌 API Endpoints
+## API
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/` | Health check |
-| POST | `/api/analyze` | Analyze user profile → scores + plan |
-| POST | `/api/chat` | AI chat response |
-| GET | `/api/flood-risk/{zip}` | Flood risk by ZIP |
-| GET | `/api/insurance-products` | List all insurance products |
+|---|---|---|
+| GET | `/` | Health + which integrations are configured |
+| POST | `/api/analyze` | Profile → scores, action plan, insurance recommendations |
+| POST | `/api/simulate` | Decision → 3 scenarios + job-loss shock test |
+| POST | `/api/chat`, `/api/simulate/chat` | Coach reply (`source`: `gemini` or `fallback`) |
+| GET | `/api/flood-risk/{zip}` | Flood risk tier + tip |
+| POST | `/api/tts` 🔒 | ElevenLabs audio |
+| GET | `/api/me` 🔒 | Auth0 profile |
 
-### Example: Analyze Profile
-```bash
-curl -X POST http://localhost:8000/api/analyze \
-  -H "Content-Type: application/json" \
-  -d '{
-    "age": 28,
-    "annual_income": 72000,
-    "monthly_expenses": 3200,
-    "dependents": 1,
-    "housing_type": "rent",
-    "zip_code": "77001",
-    "employment": "employed",
-    "has_savings": false,
-    "savings_months": 0
-  }'
-```
+## Changelog (portfolio-upgrade)
 
----
+- Insurance score is now **deterministic**. It was `random.randint(30, 70)`, so the same profile scored differently on every request.
+- Gemini coach re-enabled behind `GEMINI_API_KEY`, with the key sent in a header instead of the URL; falls back to an expanded offline coach.
+- Static demo mode: JS engine, guest auth, hash routing and browser TTS, so the app runs on GitHub Pages.
+- Removed committed `.env` files and stopped referencing an ElevenLabs key in frontend code, where Vite would have embedded it in public JavaScript. Added `.env.example` files.
+- CORS origins configurable via `ALLOWED_ORIGINS`; credentials are only allowed with explicit origins.
+- Added the pytest and Vitest suites and CI.
 
-## ☁️ Deployment (Cloud)
+## Team
 
-### Option A: Render.com (free tier, easiest)
-
-**Backend:**
-1. Push code to GitHub
-2. New Web Service → connect repo → select `backend/` folder
-3. Build command: `pip install -r requirements.txt`
-4. Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-
-**Frontend:**
-1. New Static Site → select `frontend/` folder
-2. Build command: `npm install && npm run build`
-3. Publish directory: `dist`
-4. Set env var: `VITE_API_URL=https://your-backend.onrender.com`
-
-### Option B: Railway.app
-
-```bash
-# Install Railway CLI
-npm install -g @railway/cli
-railway login
-railway up
-```
-
-### Option C: Vercel (frontend) + Railway (backend)
-
-Frontend → Vercel: `vercel --prod` from `frontend/`  
-Backend → Railway: connect GitHub repo, set start command
-
----
-
-## 🔑 Adding Real AI (Claude or OpenAI)
-
-When you're ready to replace mock responses with real AI:
-
-### Claude (Anthropic)
-```python
-# In backend/main.py, replace mock_ai_chat() with:
-import anthropic
-client = anthropic.Anthropic(api_key="YOUR_KEY")
-
-def real_ai_chat(message: str, profile) -> str:
-    system = "You are a financial wellness coach. Answer in plain English, no jargon."
-    msg = client.messages.create(
-        model="claude-opus-4-5",
-        max_tokens=500,
-        system=system,
-        messages=[{"role": "user", "content": message}]
-    )
-    return msg.content[0].text
-```
-
-### OpenAI
-```python
-from openai import OpenAI
-client = OpenAI(api_key="YOUR_KEY")
-
-def real_ai_chat(message: str, profile) -> str:
-    res = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are a financial wellness coach."},
-            {"role": "user", "content": message}
-        ]
-    )
-    return res.choices[0].message.content
-```
-
----
-
-## 🛠️ Troubleshooting
-
-**Backend won't start:**
-- Make sure Python virtual environment is activated
-- Check Python version: `python --version` (needs 3.9+)
-
-**Frontend can't reach backend:**
-- Ensure backend is running on port 8000
-- Check `vite.config.js` proxy settings
-
-**CORS errors:**
-- Backend already has CORS configured for localhost:5173 and localhost:3000
-- For production, update `allow_origins` in `main.py`
-
-**Port already in use:**
-```bash
-# Kill port 8000
-lsof -ti:8000 | xargs kill -9
-# Kill port 5173
-lsof -ti:5173 | xargs kill -9
-```
-
----
-
-## 📜 License
-
-MIT — Built for StateFarm Financial Wellness Hackathon
+Built at the hackathon by the FinGuard team (simulator engine by Charan). <!-- add names / roles -->
